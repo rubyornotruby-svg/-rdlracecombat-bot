@@ -107,6 +107,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
   </header>
 
   <div id="halt" hidden class="alert">Plancher atteint : le bot a tout vendu et s'est arrêté.</div>
+  <div id="pend" hidden class="alert">Plancher 85 % atteint : le bot est en pause et attend ta réponse sur GitHub (« continuer » ou « vendre », 10 min).</div>
 
   <section class="card hero" aria-label="Résumé">
     <div class="ringbox">
@@ -114,7 +115,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
         <circle cx="60" cy="60" r="50" fill="none" stroke="var(--ring)" stroke-width="12"/>
         <circle id="ring" cx="60" cy="60" r="50" fill="none" stroke="var(--up)" stroke-width="12" stroke-linecap="round" stroke-dasharray="314.16" stroke-dashoffset="314.16"/>
       </svg>
-      <div class="center"><b class="num" id="cushion">…</b><span>au-dessus du<br>plancher <span id="floor">90 000</span> €</span></div>
+      <div class="center"><b class="num" id="cushion">…</b><span>au-dessus du<br>plancher <span id="floor">85 000</span> €</span></div>
     </div>
     <div class="duo">
       <div class="stat"><span class="lbl">Capital du bot (prix en direct)</span><span class="big num" id="equity">…</span><span class="sub num" id="perf">…</span></div>
@@ -125,7 +126,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
 
   <div class="cols">
     <section class="card" aria-label="Marché">
-      <h2>Marché · signal 4 h</h2>
+      <h2>Marché · signal 2 h</h2>
       <ul class="list" id="market"></ul>
     </section>
     <div class="stack">
@@ -148,10 +149,10 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
   <section class="card" aria-label="Règles">
     <h2>Règles du bot</h2>
     <div class="tags">
-      <span>Cassure 50 / 20 en 4 h</span><span>BTC 20 % · autres 3 %</span><span>8 autres cryptos max</span><span>Filtre BTC</span><span>Plancher 90 000 € · arrêt à 91 800 €</span><span>Frais 0,10 %</span>
+      <span>Cassure 50 / 20 en 2 h</span><span>BTC 20 % · autres 3 %</span><span>8 autres cryptos max</span><span>Filtre BTC</span><span>Plancher 85 000 € (question à 86 700 €) · dernière limite 75 000 €</span><span>Frais 0,10 %</span>
     </div>
   </section>
-  <p class="foot">Simulation uniquement : aucun argent réel. Le bot tourne toutes les 4 heures sur les serveurs de GitHub. Les prix en direct ne servent qu'à l'affichage.</p>
+  <p class="foot">Simulation uniquement : aucun argent réel. Le bot tourne toutes les 2 heures sur les serveurs de GitHub. Les prix en direct ne servent qu'à l'affichage.</p>
 </div>
 
 <script>
@@ -186,7 +187,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
     text("winrate", D.trades? (D.wins+" gagnants · "+Math.round(D.wins/D.trades*100)+" % de réussite") : "Aucun trade clôturé pour l'instant");
     text("npos", D.positions.length+" / 9");
     text("expo", Math.round(invested/eq*100)+" % du capital investi");
-    el("halt").hidden=!D.halted;
+    el("halt").hidden=!D.halted; el("pend").hidden=!D.pending;
     var sb=el("s-bot"); sb.innerHTML=""; var dot=document.createElement("span"); dot.className="dot"+(D.halted||stale()?" off":""); sb.appendChild(dot);
     sb.appendChild(document.createTextNode("Bot ")); var bb=document.createElement("b"); bb.textContent=D.halted?"arrêté":(stale()?"en retard":"actif"); sb.appendChild(bb);
     text("s-run", ago(D.updated));
@@ -220,7 +221,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
       d.querySelector(".coin").textContent=p.sym;
       d.querySelector(".top b").textContent=int0.format(p.cost)+" €";
       d.querySelector(".top small").textContent="entrée "+px(p.entry)+" · depuis le "+when(p.since);
-      d.querySelector(".s2").textContent="sortie si clôture 4 h sous "+px(p.stop)+" · prix "+px(now);
+      d.querySelector(".s2").textContent="sortie si clôture 2 h sous "+px(p.stop)+" · prix "+px(now);
       var ge=d.querySelector(".g"); ge.textContent=money(g); d.querySelector(".gain").className="gain num "+(g>=0?"up":"down");
       d.querySelector(".gain small").textContent=(g>=0?"+":"−")+Math.abs(g/p.cost*100).toFixed(1).replace(".",",")+" %";
       P.appendChild(d);
@@ -242,7 +243,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
     });
   }
 
-  function stale(){ return D && (Date.now()-D.updated) > 6*3600*1000; }
+  function stale(){ return D && (Date.now()-D.updated) > 3*3600*1000; }
 
   function drawChart(){
     var box=el("chart"); var h=D.history||[];

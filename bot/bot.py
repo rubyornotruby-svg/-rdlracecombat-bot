@@ -1,8 +1,8 @@
 """
 RDLRACECOMBAT — bot V2 en PAPER TRADING (aucun argent réel, aucune clé API, aucun ordre réel).
 
-Toutes les 4 h (GitHub Actions), le bot :
-  1. lit les bougies 4 h publiques de Binance pour 20 cryptos (data-api.binance.vision, sans clé) ;
+Toutes les 2 h (GitHub Actions), le bot :
+  1. lit les bougies 2 h publiques de Binance pour 20 cryptos (data-api.binance.vision, sans clé) ;
   2. rejoue toutes les bougies pas encore traitées depuis son dernier passage (rattrapage) ;
   3. applique la règle V2 testée :
        - signal par crypto : cassure du plus haut des 50 bougies précédentes -> en position,
@@ -11,7 +11,10 @@ Toutes les 4 h (GitHub Actions), le bot :
        - BTC = cœur à 20 % du capital, autres cryptos 3 % chacune, 8 au maximum ;
        - autres cryptos achetées seulement si BTC est lui-même en signal BUY ;
        - total investi <= 4 x (capital - plancher x 1,02) ;
-       - plancher 90 000 : si le capital tombe à 91 800, tout est vendu et le bot s'arrête ;
+       - plancher 1 = 85 000 : si le capital tombe à 86 700, le bot se met en pause et pose la question
+         (10 minutes pour répondre « continuer » ou « vendre » ; sans réponse -> tout est vendu, arrêt) ;
+         « continuer » -> le plancher descend à 75 000 ;
+       - plancher 2 = 75 000 (dernière limite) : à 76 500, tout est vendu et le bot s'arrête, sans question ;
        - frais 0,10 % à l'achat et à la vente ;
   4. enregistre son état (state.json) et les données du site (docs/data.json).
 
@@ -22,10 +25,11 @@ from datetime import datetime, timezone
 
 SYMS = ["BTC","ETH","BNB","XRP","SOL","ADA","DOGE","TRX","LINK","AVAX",
         "DOT","LTC","BCH","XLM","ATOM","ETC","NEAR","UNI","FIL","AAVE"]
-P = dict(capital0=100000.0, floor=90000.0, margin=0.02, pct_btc=0.20, pct_alt=0.03,
+P = dict(capital0=100000.0, floor=85000.0, floor2=75000.0, margin=0.02, pct_btc=0.20, pct_alt=0.03,
          max_alt=8, cppi=4.0, fee=0.001, len_in=50, len_out=20)
-H4 = 4 * 3600 * 1000
-API = "https://data-api.binance.vision/api/v3/klines?symbol={s}USDT&interval=4h&limit={n}"
+TF = "2h"
+H4 = 2 * 3600 * 1000          # durée d'une bougie (2 h) en millisecondes
+API = "https://data-api.binance.vision/api/v3/klines?symbol={s}USDT&interval=2h&limit={n}"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE = os.path.join(ROOT, "state.json")
 SITE = os.path.join(ROOT, "docs", "data.json")
@@ -33,7 +37,7 @@ SITE = os.path.join(ROOT, "docs", "data.json")
 
 # ----------------------------------------------------------------- données
 def fetch(sym, n=1000):
-    """Bougies 4 h (open_time_ms, o, h, l, c, close_time_ms) — données publiques Binance."""
+    """Bougies 2 h (open_time_ms, o, h, l, c, close_time_ms) — données publiques Binance."""
     url = API.format(s=sym, n=n)
     for attempt in range(3):
         try:
@@ -85,8 +89,23 @@ def exit_level(bars):
 
 # ----------------------------------------------------------------- moteur
 def new_state(start_ms):
-    return dict(version=1, start=start_ms, cash=P["capital0"], positions={}, last_open=start_ms - H4,
-                halted=False, journal=[], history=[], warnings=[])
+    return dict(version=2, tf=TF, start=start_ms, cash=P["capital0"], positions={}, last_open=start_ms - H4,
+                halted=False, floor=P["floor"], pending=None, journal=[], history=[], warnings=[])
+
+
+def floor_now(S):
+    return S.get("floor", P["floor"])
+
+
+def sell_all(S, t, reason):
+    fee = P["fee"]
+    for s in list(S["positions"]):
+        v = S["positions"].pop(s)
+        proceeds = v["qty"] * v["last"] * (1 - fee)
+        S["cash"] += proceeds
+        S["journal"].append(dict(sym=s, entry_time=v["time"], entry=v["entry"], exit_time=t, exit=v["last"],
+                                 pnl=round(proceeds - v["cost"], 2), r=round(proceeds / v["cost"] - 1, 5), reason=reason))
+    S["halted"] = True
 
 
 def step(S, t_open, opens, sig_now, sig_prev):
@@ -99,16 +118,15 @@ def step(S, t_open, opens, sig_now, sig_prev):
     equity = S["cash"] + sum(v["qty"] * v["last"] for v in pos.values())
     if S["halted"]:
         return equity
-    # plancher
-    if equity <= P["floor"] * (1 + P["margin"]):
-        for s in list(pos):
-            v = pos.pop(s)
-            proceeds = v["qty"] * v["last"] * (1 - fee)
-            S["cash"] += proceeds
-            S["journal"].append(dict(sym=s, entry_time=v["time"], entry=v["entry"], exit_time=t_open, exit=v["last"],
-                                     pnl=round(proceeds - v["cost"], 2), r=round(proceeds / v["cost"] - 1, 5), reason="Plancher"))
-        S["halted"] = True
-        S["warnings"].append(dict(time=t_open, msg="Plancher atteint : tout est vendu, le bot est arrêté."))
+    # planchers
+    fl = floor_now(S)
+    if equity <= fl * (1 + P["margin"]):
+        if fl > P["floor2"]:                       # plancher 1 (85 %) : pause et question
+            S["pending"] = dict(time=t_open, equity=round(equity, 2), asked=None, issue=None)
+            S["warnings"].append(dict(time=t_open, msg=f"Plancher 85 % atteint ({equity:,.0f} €) : le bot attend ta réponse (10 min)."))
+            return None
+        sell_all(S, t_open, "Plancher 75 %")       # plancher 2 (75 %) : vente immédiate, arrêt
+        S["warnings"].append(dict(time=t_open, msg="Dernière limite (75 %) atteinte : tout est vendu, le bot est arrêté."))
         return S["cash"]
     # sorties
     for s in list(pos):
@@ -132,7 +150,7 @@ def step(S, t_open, opens, sig_now, sig_prev):
                 continue
         amt = equity * (P["pct_btc"] if s == "BTC" else P["pct_alt"])
         invested = sum(v["qty"] * v["last"] for v in pos.values())
-        amt = min(amt, P["cppi"] * (equity - P["floor"] * (1 + P["margin"])) - invested)
+        amt = min(amt, P["cppi"] * (equity - fl * (1 + P["margin"])) - invested)
         if amt < 0.01 * equity or S["cash"] < amt:
             continue
         p = opens[s]
@@ -142,7 +160,7 @@ def step(S, t_open, opens, sig_now, sig_prev):
 
 
 def run(S, data, now_ms):
-    """Rejoue toutes les ouvertures de bougies 4 h postérieures à S['last_open'] et déjà commencées."""
+    """Rejoue toutes les ouvertures de bougies 2 h postérieures à S['last_open'] et déjà commencées."""
     sig = {s: states([b for b in data[s] if b[5] < now_ms]) for s in SYMS if data.get(s)}
     # index : open_time -> (open, état à la clôture de la bougie précédente)
     idx = {}
@@ -161,10 +179,14 @@ def run(S, data, now_ms):
     for t in sorted(idx):
         if t <= S["last_open"] or t < S["start"] or t > now_ms:
             continue
+        if S.get("pending"):
+            break                                       # en attente de ta réponse : on ne va pas plus loin
         opens = {s: v[0] for s, v in idx[t].items()}
         now_sig = {s: v[1] for s, v in idx[t].items()}
         prev_sig = {s: v[2] for s, v in idx[t].items()}
         eq = step(S, t, opens, now_sig, prev_sig)
+        if eq is None:                                  # pause au plancher 1 : cette bougie sera retraitée après la réponse
+            break
         S["last_open"] = t
         S["history"].append([t, round(eq, 2)])
         done += 1
@@ -192,7 +214,7 @@ def site_data(S, data, sig, now_ms):
                               stop=exit_level(bars), qty=v["qty"], cost=v["cost"], since=v["time"]))
     return dict(updated=now_ms, next_run=(S["last_open"] + H4 + 5 * 60 * 1000), start=S["start"], params=P,
                 capital0=P["capital0"], equity=round(equity, 2), cash=round(S["cash"], 2), halted=S["halted"],
-                floor=P["floor"], trades=len(closed), wins=wins, positions=positions, market=market,
+                floor=floor_now(S), floor1=P["floor"], floor2=P["floor2"], pending=S.get("pending"), tf=TF, trades=len(closed), wins=wins, positions=positions, market=market,
                 journal=list(reversed(closed[-100:])), history=S["history"][-2200:], warnings=S["warnings"][-20:])
 
 
@@ -205,6 +227,7 @@ def main():
     ap.add_argument("--state", default=STATE)
     ap.add_argument("--site", default=SITE)
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--decision", choices=["continuer", "vendre"])
     a = ap.parse_args()
 
     def ms(d):
@@ -221,9 +244,23 @@ def main():
             S = json.load(open(a.state))
         else:
             S = new_state((now_ms // H4) * H4 - H4)  # démarrage : dernière bougie ouverte
+    if a.decision and S.get("pending"):
+        t = S["pending"]["time"]
+        if a.decision == "continuer":
+            S["floor"] = P["floor2"]
+            S["warnings"].append(dict(time=t, msg="Réponse « continuer » : le plancher descend à 75 000 € (dernière limite)."))
+        else:
+            for s, v in S["positions"].items():          # prix d'ouverture de la bougie de la pause
+                b = next((b for b in data.get(s, []) if b[0] == t), None)
+                if b:
+                    v["last"] = b[1]
+            sell_all(S, t, "Plancher 85 %")
+            S["last_open"] = t
+            S["warnings"].append(dict(time=t, msg="Pas de réponse ou « vendre » : tout est vendu au plancher 85 %, le bot est arrêté."))
+        S["pending"] = None
     sig, done = run(S, data, now_ms)
     out = site_data(S, data, sig, now_ms)
-    os.makedirs(os.path.dirname(a.site), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(a.site)), exist_ok=True)
     json.dump(S, open(a.state, "w"), separators=(",", ":"))
     json.dump(out, open(a.site, "w"), separators=(",", ":"))
     print(f"Bougies traitées : {done} | capital : {out['equity']:,.2f} | positions : {len(out['positions'])} | "

@@ -1,13 +1,14 @@
-# RDLRACECOMBAT — lance le bot paper trading toutes les 4 heures (après chaque clôture de bougie 4 h UTC).
+# RDLRACECOMBAT — lance le bot paper trading toutes les 2 heures (après chaque clôture de bougie 2 h UTC).
 name: Bot paper trading
 
 on:
   schedule:
-    - cron: "7 0,4,8,12,16,20 * * *"   # 7 minutes après chaque clôture de bougie 4 h (heure UTC)
-  workflow_dispatch:                     # bouton « Run workflow » pour le lancer à la main
+    - cron: "7 */2 * * *"   # 7 minutes après chaque clôture de bougie 2 h (heure UTC)
+  workflow_dispatch:         # bouton « Run workflow » pour le lancer à la main
 
 permissions:
   contents: write
+  issues: write              # pour te poser la question au plancher 85 %
 
 concurrency:
   group: bot
@@ -16,7 +17,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,7 +25,12 @@ jobs:
           python-version: "3.12"
       - name: Lancer le bot (paper trading, aucun argent réel)
         run: python bot/bot.py
+      - name: Plancher 85 % — question et 10 minutes pour répondre (seulement si besoin)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python bot/decision.py
       - name: Enregistrer l'état et les données du site
+        if: always()
         run: |
           git config user.name "rdlracecombat-bot"
           git config user.email "bot@users.noreply.github.com"
