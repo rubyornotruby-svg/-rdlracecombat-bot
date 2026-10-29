@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 SYMS = ["BTC","ETH","BNB","XRP","SOL","ADA","DOGE","TRX","LINK","AVAX",
         "DOT","LTC","BCH","XLM","ATOM","ETC","NEAR","UNI","FIL","AAVE"]
-P = dict(capital0=102120.46, floor=90000.0, margin=0.02, pct_btc=0.20, pct_alt=0.03,
+P = dict(capital0=100000.0, floor=90000.0, margin=0.02, pct_btc=0.20, pct_alt=0.03,
          max_alt=8, cppi=4.0, fee=0.001, len_in=50, len_out=20)
 H4 = 4 * 3600 * 1000
 API = "https://data-api.binance.vision/api/v3/klines?symbol={s}USDT&interval=4h&limit={n}"
