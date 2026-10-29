@@ -1,0 +1,18 @@
+name: Recherche - telechargement donnees 1h
+on:
+  push:
+    branches: [recherche-donnees]
+    paths: [recherche/telecharger.py]
+permissions:
+  contents: write
+jobs:
+  data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: python recherche/telecharger.py
+      - run: |
+          git config user.name "rdlracecombat-bot"; git config user.email "bot@users.noreply.github.com"
+          git add recherche/crypto-1h.csv.gz; git commit -m "Données 1 h pour la recherche n°12"; git push
